@@ -1,0 +1,38 @@
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.form-row {
+  display: flex;
+  gap: 1rem;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.form-group.half {
+  flex: 1;
+}
+
+.form-group.third {
+  flex: 1;
+}
+
+.form-group.full {
+  width: 100%;
+}
+
+.preview-container {
+  margin-top: 0.5rem;
+}
+
+.preview-img {
+  max-width: 100%;
+  max-height: 120px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+}
