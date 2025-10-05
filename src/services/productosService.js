@@ -44,3 +44,62 @@ export async function deleteProducto(id) {
   if (error) throw error
   return data
 }
+
+/* -------------------------------------------------------------------------- */
+/*                               🔽 FUNCIONES DE PEDIDOS                      */
+/* -------------------------------------------------------------------------- */
+
+// Obtener pedidos (con proveedor)
+export async function getPedidos() {
+  const { data, error } = await supabase
+    .from("pedidos")
+    .select(`
+      *,
+      proveedores (nombre)
+    `)
+    .order("fecha", { ascending: false })
+
+  if (error) throw error
+
+  return data.map((p) => ({
+    ...p,
+    proveedor_nombre: p.proveedores?.nombre || "Sin proveedor",
+  }))
+}
+
+// Crear pedido con sus detalles
+export async function crearPedido({ proveedor_id, detalles }) {
+  const total = detalles.reduce((sum, item) => sum + item.subtotal, 0)
+
+  // Insertar pedido principal
+  const { data: pedido, error: pedidoError } = await supabase
+    .from("pedidos")
+    .insert([
+      {
+        proveedor_id: proveedor_id || null,
+        fecha: new Date(),
+        total,
+      },
+    ])
+    .select()
+    .single()
+
+  if (pedidoError) throw pedidoError
+
+  // Insertar detalles
+  const detallesData = detalles.map((item) => ({
+    pedido_id: pedido.id,
+    producto_id: item.id,
+    cantidad: item.cantidad,
+    precio_unitario: item.precio_unitario,
+    subtotal: item.subtotal,
+  }))
+
+  const { error: detalleError } = await supabase
+    .from("detalle_pedidos")
+    .insert(detallesData)
+
+  if (detalleError) throw detalleError
+
+  return pedido
+}

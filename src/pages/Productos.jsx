@@ -1,16 +1,19 @@
-import React, { useState, useEffect } from "react";    
+import React, { useState, useEffect } from "react";     
 import { getProductos, deleteProducto } from "../services/productosService";
 import ProductoModal from "./ProductoModal";
 
 function Productos() {
   const [productos, setProductos] = useState([]);
+  const [filteredProductos, setFilteredProductos] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [selectedProducto, setSelectedProducto] = useState(null); // para editar
+  const [search, setSearch] = useState("");
 
   const fetchProductos = async () => {
     try {
       const data = await getProductos();
       setProductos(data);
+      setFilteredProductos(data);
     } catch (error) {
       console.error("Error cargando productos:", error.message);
     }
@@ -19,6 +22,19 @@ function Productos() {
   useEffect(() => {
     fetchProductos();
   }, []);
+
+  // Filtrar productos según el buscador
+  useEffect(() => {
+    const lowerSearch = search.toLowerCase();
+    setFilteredProductos(
+      productos.filter(
+        (p) =>
+          p.nombre.toLowerCase().includes(lowerSearch) ||
+          (p.proveedor_nombre && p.proveedor_nombre.toLowerCase().includes(lowerSearch)) ||
+          (p.categoria_nombre && p.categoria_nombre.toLowerCase().includes(lowerSearch))
+      )
+    );
+  }, [search, productos]);
 
   const handleEdit = (producto) => {
     setSelectedProducto(producto);
@@ -45,8 +61,17 @@ function Productos() {
   return (
     <div style={{ padding: "20px" }}>
       <h2>Productos</h2>
-      <button onClick={() => setShowModal(true)}>Agregar Producto</button>
-      
+      <div style={{ marginBottom: "10px", display: "flex", gap: "10px" }}>
+        <button onClick={() => setShowModal(true)}>Agregar Producto</button>
+        <input
+          type="text"
+          placeholder="Buscar por nombre, proveedor o categoría..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ flex: 1, padding: "5px" }}
+        />
+      </div>
+
       <table border="1" cellPadding="8" style={{ width: "100%", marginTop: "10px" }}>
         <thead>
           <tr>
@@ -68,7 +93,7 @@ function Productos() {
           </tr>
         </thead>
         <tbody>
-          {productos.map((p) => (
+          {filteredProductos.map((p) => (
             <tr key={p.id}>
               <td>{p.nombre}</td>
               <td>{p.precio_venta}</td>
