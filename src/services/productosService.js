@@ -1,5 +1,8 @@
-// src/services/productosService.js
-import { supabase } from "../supabaseClient"
+import { supabase } from "../supabaseClient";
+
+/* -------------------------------------------------------------------------- */
+/*                             🔹 FUNCIONES DE PRODUCTOS                       */
+/* -------------------------------------------------------------------------- */
 
 // Obtener productos con nombres de proveedor y categoría
 export async function getProductos() {
@@ -9,23 +12,22 @@ export async function getProductos() {
       *,
       proveedores (nombre),
       categorias (nombre)
-    `)
+    `);
 
-  if (error) throw error
+  if (error) throw error;
 
-  // Mapear para que sea más fácil de usar en React
   return data.map((p) => ({
     ...p,
     proveedor_nombre: p.proveedores?.nombre || "",
     categoria_nombre: p.categorias?.nombre || "",
-  }))
+  }));
 }
 
 // Agregar producto
 export async function addProducto(producto) {
-  const { data, error } = await supabase.from("productos").insert([producto])
-  if (error) throw error
-  return data
+  const { data, error } = await supabase.from("productos").insert([producto]).select();
+  if (error) throw error;
+  return data;
 }
 
 // Actualizar producto
@@ -34,19 +36,20 @@ export async function updateProducto(id, producto) {
     .from("productos")
     .update(producto)
     .eq("id", id)
-  if (error) throw error
-  return data
+    .select();
+  if (error) throw error;
+  return data;
 }
 
 // Eliminar producto
 export async function deleteProducto(id) {
-  const { data, error } = await supabase.from("productos").delete().eq("id", id)
-  if (error) throw error
-  return data
+  const { data, error } = await supabase.from("productos").delete().eq("id", id);
+  if (error) throw error;
+  return data;
 }
 
 /* -------------------------------------------------------------------------- */
-/*                               🔽 FUNCIONES DE PEDIDOS                      */
+/*                               🔹 FUNCIONES DE PEDIDOS                       */
 /* -------------------------------------------------------------------------- */
 
 // Obtener pedidos (con proveedor)
@@ -57,49 +60,64 @@ export async function getPedidos() {
       *,
       proveedores (nombre)
     `)
-    .order("fecha", { ascending: false })
+    .order("fecha", { ascending: false });
 
-  if (error) throw error
+  if (error) throw error;
 
   return data.map((p) => ({
     ...p,
     proveedor_nombre: p.proveedores?.nombre || "Sin proveedor",
-  }))
+  }));
 }
 
 // Crear pedido con sus detalles
-export async function crearPedido({ proveedor_id, detalles }) {
-  const total = detalles.reduce((sum, item) => sum + item.subtotal, 0)
+export async function crearPedido({ tipoPedido, proveedor_id, categoria_id, detalles }) {
+  try {
+    if (!detalles || detalles.length === 0) {
+      throw new Error("No hay productos en el pedido.");
+    }
 
-  // Insertar pedido principal
-  const { data: pedido, error: pedidoError } = await supabase
-    .from("pedidos")
-    .insert([
-      {
-        proveedor_id: proveedor_id || null,
-        fecha: new Date(),
-        total,
-      },
-    ])
-    .select()
-    .single()
+    const total = detalles.reduce(
+      (sum, item) => sum + (item.subtotal || item.cantidad * item.precio_compra),
+      0
+    );
 
-  if (pedidoError) throw pedidoError
+    // Insertar pedido principal
+    const { data: pedido, error: pedidoError } = await supabase
+      .from("pedidos")
+      .insert([
+        {
+          tipo_pedido: tipoPedido || null,
+          proveedor_id: proveedor_id || null,
+          categoria_id: categoria_id || null,
+          fecha: new Date().toISOString(),
+          total,
+        },
+      ])
+      .select()
+      .single();
 
-  // Insertar detalles
-  const detallesData = detalles.map((item) => ({
-    pedido_id: pedido.id,
-    producto_id: item.id,
-    cantidad: item.cantidad,
-    precio_unitario: item.precio_unitario,
-    subtotal: item.subtotal,
-  }))
+    if (pedidoError) throw pedidoError;
 
-  const { error: detalleError } = await supabase
-    .from("detalle_pedidos")
-    .insert(detallesData)
+    // Insertar detalles
+    const detallesData = detalles.map((item) => ({
+      pedido_id: pedido.id,
+      producto_id: item.id,
+      cantidad: item.cantidad,
+      precio_unitario: item.precio_compra, // 👈 corregido
+      subtotal: item.subtotal || item.cantidad * item.precio_compra,
+    }));
 
-  if (detalleError) throw detalleError
+    const { error: detalleError } = await supabase
+      .from("detalle_pedidos")
+      .insert(detallesData);
 
-  return pedido
+    if (detalleError) throw detalleError;
+
+    console.log("✅ Pedido creado correctamente:", pedido);
+    return pedido;
+  } catch (error) {
+    console.error("❌ Error al crear pedido:", error.message);
+    throw error;
+  }
 }

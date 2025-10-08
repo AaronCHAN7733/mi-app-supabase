@@ -1,41 +1,91 @@
-import React, { useState, useEffect } from "react";     
-import { getProductos, deleteProducto } from "../services/productosService";
+import React, { useState, useEffect } from "react";
+import { supabase } from "../supabaseClient";
+import { deleteProducto } from "../services/productosService";
 import ProductoModal from "./ProductoModal";
 
 function Productos() {
   const [productos, setProductos] = useState([]);
   const [filteredProductos, setFilteredProductos] = useState([]);
   const [showModal, setShowModal] = useState(false);
-  const [selectedProducto, setSelectedProducto] = useState(null); // para editar
+  const [selectedProducto, setSelectedProducto] = useState(null);
   const [search, setSearch] = useState("");
+  const [tiendaId, setTiendaId] = useState(null);
 
-  const fetchProductos = async () => {
+  // 🔹 1. Obtener la tienda_id del usuario autenticado
+  const fetchTiendaId = async () => {
     try {
-      const data = await getProductos();
-      setProductos(data);
-      setFilteredProductos(data);
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError || !userData?.user) {
+        console.error("Error obteniendo usuario:", userError?.message);
+        return;
+      }
+
+      const authId = userData.user.id;
+      const { data: usuario, error: usuarioError } = await supabase
+        .from("usuarios")
+        .select("tienda_id")
+        .eq("auth_id", authId)
+        .single();
+
+      if (usuarioError) throw usuarioError;
+      setTiendaId(usuario.tienda_id);
+    } catch (error) {
+      console.error("Error obteniendo tienda del usuario:", error.message);
+    }
+  };
+
+  // 🔹 2. Obtener productos con nombres de proveedor y categoría
+  const fetchProductos = async (tienda_id) => {
+    try {
+      const { data, error } = await supabase
+        .from("productos")
+        .select(`
+          *,
+          proveedores:proveedor_id ( nombre ),
+          categorias:categoria_id ( nombre )
+        `)
+        .eq("tienda_id", tienda_id);
+
+      if (error) throw error;
+
+      // 🔸 Mapear los nombres
+      const productosConNombres = data.map((p) => ({
+        ...p,
+        proveedor_nombre: p.proveedores?.nombre || "Sin proveedor",
+        categoria_nombre: p.categorias?.nombre || "Sin categoría",
+      }));
+
+      setProductos(productosConNombres);
+      setFilteredProductos(productosConNombres);
     } catch (error) {
       console.error("Error cargando productos:", error.message);
     }
   };
 
+  // 🔹 3. Cargar productos cuando haya tiendaId
   useEffect(() => {
-    fetchProductos();
+    if (tiendaId) fetchProductos(tiendaId);
+  }, [tiendaId]);
+
+  // 🔹 4. Obtener tienda al iniciar
+  useEffect(() => {
+    fetchTiendaId();
   }, []);
 
-  // Filtrar productos según el buscador
+  // 🔹 5. Filtrar productos
   useEffect(() => {
     const lowerSearch = search.toLowerCase();
     setFilteredProductos(
       productos.filter(
         (p) =>
-          p.nombre.toLowerCase().includes(lowerSearch) ||
-          (p.proveedor_nombre && p.proveedor_nombre.toLowerCase().includes(lowerSearch)) ||
-          (p.categoria_nombre && p.categoria_nombre.toLowerCase().includes(lowerSearch))
+          p.nombre?.toLowerCase().includes(lowerSearch) ||
+          p.proveedor_nombre?.toLowerCase().includes(lowerSearch) ||
+          p.categoria_nombre?.toLowerCase().includes(lowerSearch)
       )
     );
   }, [search, productos]);
 
+  // 🔹 6. Acciones
   const handleEdit = (producto) => {
     setSelectedProducto(producto);
     setShowModal(true);
@@ -45,7 +95,7 @@ function Productos() {
     if (window.confirm("¿Seguro que quieres eliminar este producto?")) {
       try {
         await deleteProducto(id);
-        fetchProductos();
+        fetchProductos(tiendaId);
       } catch (error) {
         console.error("Error eliminando producto:", error.message);
       }
@@ -55,7 +105,7 @@ function Productos() {
   const handleCloseModal = () => {
     setShowModal(false);
     setSelectedProducto(null);
-    fetchProductos();
+    fetchProductos(tiendaId);
   };
 
   return (
@@ -112,7 +162,12 @@ function Productos() {
                   <img
                     src={p.imagen_url}
                     alt={p.nombre}
-                    style={{ width: "60px", height: "60px", objectFit: "cover", borderRadius: "4px" }}
+                    style={{
+                      width: "60px",
+                      height: "60px",
+                      objectFit: "cover",
+                      borderRadius: "4px",
+                    }}
                   />
                 ) : (
                   "No hay imagen"
@@ -121,7 +176,10 @@ function Productos() {
               <td>{p.porcentaje_ganancia}</td>
               <td>
                 <button onClick={() => handleEdit(p)}>Editar</button>
-                <button onClick={() => handleDelete(p.id)} style={{ marginLeft: "5px", color: "red" }}>
+                <button
+                  onClick={() => handleDelete(p.id)}
+                  style={{ marginLeft: "5px", color: "red" }}
+                >
                   Borrar
                 </button>
               </td>
@@ -131,10 +189,7 @@ function Productos() {
       </table>
 
       {showModal && (
-        <ProductoModal
-          producto={selectedProducto} // pasar producto seleccionado para editar
-          onClose={handleCloseModal}
-        />
+        <ProductoModal producto={selectedProducto} onClose={handleCloseModal} />
       )}
     </div>
   );

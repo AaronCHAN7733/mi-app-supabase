@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";   
+import React, { useState, useEffect } from "react";
 import { addProducto, updateProducto } from "../services/productosService";
 import { supabase } from "../supabaseClient";
 
@@ -22,16 +22,51 @@ function ProductoModal({ onClose, producto }) {
 
   const [proveedores, setProveedores] = useState([]);
   const [categorias, setCategorias] = useState([]);
-
+  const [tiendaId, setTiendaId] = useState(null);
   const [marcaActivada, setMarcaActivada] = useState(true);
   const [segundoCodigoActivado, setSegundoCodigoActivado] = useState(true);
 
+  // 🔹 Obtener tienda_id del usuario autenticado
+  const fetchTiendaId = async () => {
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError || !userData?.user) {
+        console.error("Error obteniendo usuario:", userError?.message);
+        return;
+      }
+
+      const authId = userData.user.id;
+
+      const { data: usuario, error: usuarioError } = await supabase
+        .from("usuarios")
+        .select("tienda_id")
+        .eq("auth_id", authId)
+        .single();
+
+      if (usuarioError) throw usuarioError;
+      setTiendaId(usuario.tienda_id);
+      return usuario.tienda_id;
+    } catch (error) {
+      console.error("Error obteniendo tienda del usuario:", error.message);
+    }
+  };
+
+  // 🔹 Cargar proveedores y categorías filtrados por tienda_id
   useEffect(() => {
     const fetchData = async () => {
-      const { data: prov } = await supabase.from("proveedores").select("*");
+      const tienda = await fetchTiendaId();
+      if (!tienda) return;
+
+      const { data: prov } = await supabase
+        .from("proveedores")
+        .select("*")
+        .eq("tienda_id", tienda);
       setProveedores(prov || []);
 
-      const { data: cat } = await supabase.from("categorias").select("*");
+      const { data: cat } = await supabase
+        .from("categorias")
+        .select("*")
+        .eq("tienda_id", tienda);
       setCategorias(cat || []);
 
       if (producto) {
@@ -40,23 +75,21 @@ function ProductoModal({ onClose, producto }) {
         setSegundoCodigoActivado(!!producto.segundo_codigo);
       }
     };
+
     fetchData();
   }, [producto]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-
     setForm((prev) => {
       const updated = { ...prev, [name]: value };
 
-      // Recalcular porcentaje de ganancia si cambian los precios
+      // Recalcular ganancia
       if (name === "precio_compra" || name === "precio_venta") {
-        const precioCompra = parseFloat(updated.precio_compra) || 0;
-        const precioVenta = parseFloat(updated.precio_venta) || 0;
+        const compra = parseFloat(updated.precio_compra) || 0;
+        const venta = parseFloat(updated.precio_venta) || 0;
         updated.porcentaje_ganancia =
-          precioCompra > 0
-            ? (((precioVenta - precioCompra) / precioCompra) * 100).toFixed(2)
-            : 0;
+          compra > 0 ? (((venta - compra) / compra) * 100).toFixed(2) : 0;
       }
 
       return updated;
@@ -65,6 +98,11 @@ function ProductoModal({ onClose, producto }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    if (!tiendaId) {
+      alert("Error: no se pudo obtener la tienda del usuario.");
+      return;
+    }
 
     const productoData = {
       nombre: form.nombre,
@@ -81,6 +119,8 @@ function ProductoModal({ onClose, producto }) {
       ubicacion: form.ubicacion,
       imagen_url: form.imagen_url,
       porcentaje_ganancia: form.porcentaje_ganancia,
+      tienda_id: tiendaId,
+      created_at: new Date().toISOString(),
     };
 
     try {
@@ -92,78 +132,102 @@ function ProductoModal({ onClose, producto }) {
       onClose();
     } catch (error) {
       console.error("Error guardando producto:", error.message);
+      alert("Error al guardar el producto: " + error.message);
     }
   };
 
+  // 🔹 Agregar nuevo proveedor ligado a la tienda
   const addProveedor = async () => {
-    const nombre = prompt("Nombre del nuevo proveedor:");
-    if (nombre) {
-      const { data, error } = await supabase
-        .from("proveedores")
-        .insert([{ nombre }])
-        .select();
-      if (!error) setProveedores([...proveedores, ...data]);
-    }
-  };
+    if (!tiendaId) return alert("No se puede agregar proveedor sin tienda.");
 
-  const addCategoria = async () => {
-    const nombre = prompt("Nombre de la nueva categoría:");
+    const nombre = prompt("Nombre del nuevo proveedor:");
     if (!nombre) return;
 
-    const descripcion = prompt("Descripción de la categoría (opcional):") || "";
-
     const { data, error } = await supabase
-      .from("categorias")
-      .insert([{
-        id: crypto.randomUUID(),
-        nombre,
-        descripcion,
-        created_at: new Date().toISOString(),
-      }])
+      .from("proveedores")
+      .insert([{ nombre, tienda_id: tiendaId }])
       .select();
 
     if (error) {
-      console.error("Error insertando categoría:", error);
+      console.error("Error agregando proveedor:", error.message);
       alert("Error: " + error.message);
       return;
     }
 
-    if (data) setCategorias([...categorias, ...data]);
+    setProveedores([...proveedores, ...data]);
+  };
+
+  // 🔹 Agregar nueva categoría ligada a la tienda
+  const addCategoria = async () => {
+    if (!tiendaId) return alert("No se puede agregar categoría sin tienda.");
+
+    const nombre = prompt("Nombre de la nueva categoría:");
+    if (!nombre) return;
+
+    const descripcion = prompt("Descripción (opcional):") || "";
+
+    const { data, error } = await supabase
+      .from("categorias")
+      .insert([
+        {
+          id: crypto.randomUUID(),
+          nombre,
+          descripcion,
+          tienda_id: tiendaId,
+          created_at: new Date().toISOString(),
+        },
+      ])
+      .select();
+
+    if (error) {
+      console.error("Error insertando categoría:", error.message);
+      alert("Error: " + error.message);
+      return;
+    }
+
+    setCategorias([...categorias, ...data]);
   };
 
   return (
-    <div style={{
-      position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
-      background: "rgba(0,0,0,0.5)", display: "flex",
-      justifyContent: "center", alignItems: "center"
-    }}>
-      <div style={{ background: "white", padding: "20px", borderRadius: "8px", width: "500px", maxHeight: "90vh", overflowY: "auto" }}>
+    <div
+      style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: "rgba(0,0,0,0.5)",
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
+      }}
+    >
+      <div
+        style={{
+          background: "white",
+          padding: "20px",
+          borderRadius: "8px",
+          width: "500px",
+          maxHeight: "90vh",
+          overflowY: "auto",
+        }}
+      >
         <h3>{producto ? "Editar Producto" : "Agregar Producto"}</h3>
         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-          
           <input name="nombre" placeholder="Nombre" value={form.nombre} onChange={handleChange} required />
           <input type="number" name="precio_venta" placeholder="Precio Venta" value={form.precio_venta} onChange={handleChange} required />
           <input type="number" name="precio_compra" placeholder="Precio Compra" value={form.precio_compra} onChange={handleChange} required />
           <input type="number" name="stock" placeholder="Stock" value={form.stock} onChange={handleChange} />
 
           <input name="codigo_barras" placeholder="Código de Barras" value={form.codigo_barras} onChange={handleChange} required />
-          
+
           <div>
             <label>
-              <input
-                type="checkbox"
-                checked={segundoCodigoActivado}
-                onChange={() => setSegundoCodigoActivado(!segundoCodigoActivado)}
-              />
+              <input type="checkbox" checked={segundoCodigoActivado} onChange={() => setSegundoCodigoActivado(!segundoCodigoActivado)} />
               Usar Segundo Código
             </label>
             {segundoCodigoActivado && (
-              <input
-                name="segundo_codigo"
-                placeholder="Segundo Código"
-                value={form.segundo_codigo}
-                onChange={handleChange}
-              />
+              <input name="segundo_codigo" placeholder="Segundo Código" value={form.segundo_codigo} onChange={handleChange} />
             )}
           </div>
 
@@ -176,10 +240,14 @@ function ProductoModal({ onClose, producto }) {
             <select name="proveedor_id" value={form.proveedor_id || ""} onChange={handleChange}>
               <option value="">-- Selecciona --</option>
               {proveedores.map((prov) => (
-                <option key={prov.id} value={prov.id}>{prov.nombre}</option>
+                <option key={prov.id} value={prov.id}>
+                  {prov.nombre}
+                </option>
               ))}
             </select>
-            <button type="button" onClick={addProveedor}>+</button>
+            <button type="button" onClick={addProveedor}>
+              +
+            </button>
           </div>
 
           <div>
@@ -187,19 +255,19 @@ function ProductoModal({ onClose, producto }) {
             <select name="categoria_id" value={form.categoria_id || ""} onChange={handleChange}>
               <option value="">-- Selecciona --</option>
               {categorias.map((cat) => (
-                <option key={cat.id} value={cat.id}>{cat.nombre}</option>
+                <option key={cat.id} value={cat.id}>
+                  {cat.nombre}
+                </option>
               ))}
             </select>
-            <button type="button" onClick={addCategoria}>+</button>
+            <button type="button" onClick={addCategoria}>
+              +
+            </button>
           </div>
 
           <div>
             <label>
-              <input
-                type="checkbox"
-                checked={marcaActivada}
-                onChange={() => setMarcaActivada(!marcaActivada)}
-              />
+              <input type="checkbox" checked={marcaActivada} onChange={() => setMarcaActivada(!marcaActivada)} />
               Usar Marca
             </label>
             {marcaActivada && (
@@ -209,12 +277,13 @@ function ProductoModal({ onClose, producto }) {
 
           <input name="ubicacion" placeholder="Ubicación" value={form.ubicacion} onChange={handleChange} />
           <input name="imagen_url" placeholder="Imagen URL" value={form.imagen_url} onChange={handleChange} />
-
           <input type="number" step="0.01" name="porcentaje_ganancia" placeholder="Porcentaje Ganancia" value={form.porcentaje_ganancia} readOnly />
 
           <div style={{ marginTop: "10px", display: "flex", justifyContent: "flex-end", gap: "10px" }}>
             <button type="submit">Guardar</button>
-            <button type="button" onClick={onClose}>Cancelar</button>
+            <button type="button" onClick={onClose}>
+              Cancelar
+            </button>
           </div>
         </form>
       </div>
